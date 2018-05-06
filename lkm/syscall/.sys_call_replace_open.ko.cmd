@@ -1,0 +1,1 @@
+cmd_/media/sf_shared/syscall/sys_call_replace_open.ko := ld -r -m elf_x86_64 -T /usr/src/kernels/2.6.35.6-45.fc14.x86_64/scripts/module-common.lds --build-id -o /media/sf_shared/syscall/sys_call_replace_open.ko /media/sf_shared/syscall/sys_call_replace_open.o /media/sf_shared/syscall/sys_call_replace_open.mod.o

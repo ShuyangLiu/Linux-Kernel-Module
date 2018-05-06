@@ -1,0 +1,1 @@
+cmd_/home/sliu44/share/sf_share/hello/hello.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/sliu44/share/sf_share/hello/hello.ko /home/sliu44/share/sf_share/hello/hello.o /home/sliu44/share/sf_share/hello/hello.mod.o

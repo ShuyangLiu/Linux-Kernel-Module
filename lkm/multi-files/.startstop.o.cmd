@@ -1,0 +1,1 @@
+cmd_/home/sliu44/share/sf_share/multi-files/startstop.o := ld -m elf_x86_64   -r -o /home/sliu44/share/sf_share/multi-files/startstop.o /home/sliu44/share/sf_share/multi-files/start.o /home/sliu44/share/sf_share/multi-files/stop.o 
