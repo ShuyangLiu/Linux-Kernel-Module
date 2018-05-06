@@ -1,0 +1,4 @@
+[submodule "httpserver"]
+	path = httpserver
+	url = https://github.com/chaosdefinition/httpserver.git
+	branch = master
