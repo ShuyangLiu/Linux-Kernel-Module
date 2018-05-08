@@ -1,1 +1,0 @@
-cmd_/home/sliu44/share/sf_share/multi-files/startstop.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/sliu44/share/sf_share/multi-files/startstop.ko /home/sliu44/share/sf_share/multi-files/startstop.o /home/sliu44/share/sf_share/multi-files/startstop.mod.o
